@@ -22,6 +22,44 @@
   (format nil "~{~5*~4,'0D-~2:*~2,'0D-~2:*~2,'0D ~2:*~2,'0D:~2:*~2,'0D:~2:*~2,'0D~8*~}"
           (multiple-value-list (decode-universal-time date))))
 
+(defun bare-stream (stream &key (direction :output))
+  "
+RETURN: A stream or a list of streams that are not compound streams
+        (and therefore usable by #+clisp SOCKET:SOCKET-STATUS).
+"
+  (etypecase stream
+
+    #-mocl
+    (echo-stream
+     (ecase direction
+       (:output (bare-stream (echo-stream-output-stream stream)
+                             :direction direction))
+       (:input  (bare-stream (echo-stream-input-stream  stream)
+                             :direction direction))))
+    #-mocl
+    (two-way-stream
+     (ecase direction
+       (:output (bare-stream (two-way-stream-output-stream stream)
+                             :direction direction))
+       (:input  (bare-stream (two-way-stream-input-stream stream)
+                             :direction direction))))
+
+    #-mocl
+    (synonym-stream
+     (bare-stream (symbol-value (synonym-stream-symbol stream))
+                  :direction direction))
+
+    #-mocl
+    (broadcast-stream
+     (remove-if-not
+      (lambda (stream)
+        (ecase direction
+          (:output (output-stream-p stream))
+          (:input  (input-stream-p  stream))))
+      (mapcar (lambda (stream) (bare-stream stream :direction direction))
+              (broadcast-stream-streams stream))))
+    (stream stream)))
+
 (defmacro reporting-errors (&body body)
   (let ((vhandler (gensym)))
     `(block ,vhandler
@@ -39,7 +77,10 @@
                                                        :external-format *external-format*
                                                        :if-exists :append
                                                        :if-does-not-exist :create)
-                                   (let ((errs (make-broadcast-stream errf *error-output* *trace-output*)))
+                                   (let ((errs (if (eq (bare-stream *trace-output*)
+                                                       (bare-stream *error-output*))
+                                                   (make-broadcast-stream errf *error-output*)
+                                                   (make-broadcast-stream errf *error-output* *trace-output*))))
                                      (format errs "~%~A~2%" (date))
                                      (print-backtrace errs)
                                      (format errs "~%ERROR while ~S:~%~A~2%"
@@ -105,13 +146,13 @@ publié en 1962 par MIT Press, un des maîtres­livres de l'Informatique.
 "))
 
 (defun main (&optional (arguments *args*))
-  (setf (stream-external-format *standard-output*) *external-format*)
-  (with-open-file (*trace-output* (trace-file-pathname)
-                                  :direction :output
-                                  :external-format *external-format*
-                                  :if-exists :append
-                                  :if-does-not-exist :create)
-    (reporting-errors
+  (reporting-errors
+   (with-open-file (*trace-output* (trace-file-pathname)
+                                   :direction :output
+                                   :external-format *external-format*
+                                   :if-exists :append
+                                   :if-does-not-exist :create)
+     (setf (stream-external-format *standard-output*) *external-format*)
      (let* ((scheme (getenv "REQUEST_SCHEME"))
             (host   (getenv "HTTP_HOST"))
             (port   (getenv "SERVER_PORT"))
