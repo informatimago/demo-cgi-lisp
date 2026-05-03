@@ -1,7 +1,8 @@
 all:demo.cgi
 
 demo.cgi:demo-cgi.lisp packages.lisp generate-executable.lisp Makefile
-	clisp -q -ansi -norc -x '(load "generate-executable.lisp")' -x '(quit)'
+	#clisp -q -ansi -norc -x '(load "generate-executable.lisp")' -x '(quit)'
+	ccl -norc --eval '(load "generate-executable.lisp")' --eval '(quit)'
 
 clean:
 	rm demo.cgi

@@ -93,6 +93,7 @@ RETURN: A stream or a list of streams that are not compound streams
 
 (defun lsencod ()
   (format t "~%~{~32A ~A~%~}~%"
+#+clisp
           (list
            'custom:*default-file-encoding* custom:*default-file-encoding*
            #+ffi 'custom:*foreign-encoding* #+ffi custom:*foreign-encoding*
@@ -100,8 +101,45 @@ RETURN: A stream or a list of streams that are not compound streams
            'custom:*pathname-encoding*     custom:*pathname-encoding*
            'custom:*terminal-encoding*     custom:*terminal-encoding*
            'system::*http-encoding*        system::*http-encoding*
+           '*external-format*              *external-format*)
+#-clisp
+          (list
            '*external-format*              *external-format*))
   (values))
+
+#+ccl
+(cffi:defcvar ("environ" *environ) :pointer)
+
+#+ccl
+(defun getenv-all ()
+  "Returns a list of strings (\"VAR=val\" ...)"
+  (let ((result '()))
+    (loop for i from 0
+          for ptr = (cffi:mem-aref *environ :pointer i)
+          while (not (cffi:null-pointer-p ptr))
+          do (push (cffi:foreign-string-to-lisp ptr) result))
+    (nreverse result)))
+
+(defun map-tree (fun tree)
+  (if (atom tree)
+        (funcall fun tree)
+        (cons (map-tree fun (car tree))
+              (map-tree fun (cdr tree)))))
+
+(defun escape-string (object)
+  (if (stringp object)
+      (if (find-if (lambda (ch)
+                     (or (<= 0 (char-code ch) 31)
+                         (<= 128 (char-code ch) (+ 128 31))))
+                   object)
+          (with-output-to-string (out)
+            (loop for ch across object
+                  if (or (<= 0 (char-code ch) 31)
+                         (<= 128 (char-code ch) (+ 128 31)))
+                  do (format out "\\~4,'0o" (char-code ch))
+                  else do (princ ch out)))
+          object)
+      object))
 
 (defun process-query (arguments query url)
   (format t "Content-Type: text/plain;charset=utf-8~%")
@@ -113,7 +151,14 @@ RETURN: A stream or a list of streams that are not compound streams
   (format t "~2%Encodings:~%----------~2%")
   (lsencod)
   (format t "~2%Environment:~%------------~2%")
-  (format t "~{~S~%~}" (sort (copy-list (ext:getenv)) (function string<) :key (function car)))
+  (format t "~{~S~%~}"
+          (map-tree (function escape-string)
+                    #+clisp (sort (copy-list (ext:getenv))
+                                  (function string<)
+                                  :key (function car))
+                    #+ccl   (sort (copy-list (getenv-all))
+                                  (function string<))
+                    #-(or clisp ccl) '()))
   (format t "~%")
   (format t "~2%Some text:~%----------")
   (format t "
@@ -145,22 +190,22 @@ de  LISP  (LISP  1,  sur IBM 704 justement, le manuel est daté  de  Mars
 publié en 1962 par MIT Press, un des maîtres­livres de l'Informatique.
 "))
 
-(defun main (&optional (arguments *args*))
+(defun main (&optional (arguments #+clisp *args* #+ccl (ccl::command-line-arguments)))
   (reporting-errors
    (with-open-file (*trace-output* (trace-file-pathname)
                                    :direction :output
                                    :external-format *external-format*
                                    :if-exists :append
                                    :if-does-not-exist :create)
-     (setf (stream-external-format *standard-output*) *external-format*)
-     (let* ((scheme (getenv "REQUEST_SCHEME"))
-            (host   (getenv "HTTP_HOST"))
-            (port   (getenv "SERVER_PORT"))
-            (uri    (getenv "REQUEST_URI"))
-            (query  (getenv "QUERY_STRING"))
+     (setf (stream-external-format (bare-stream *standard-output*)) *external-format*)
+     (let* ((scheme (uiop:getenv "REQUEST_SCHEME"))
+            (host   (uiop:getenv "HTTP_HOST"))
+            (port   (uiop:getenv "SERVER_PORT"))
+            (uri    (uiop:getenv "REQUEST_URI"))
+            (query  (uiop:getenv "QUERY_STRING"))
             (url    (format nil "~A://~A:~A~A" scheme host port uri)))
        (process-query arguments query url))
      (finish-output)
-     (exit 0))))
+     0)))
 
 

@@ -7,6 +7,7 @@
                      :defaults *load-pathname*)
       asdf:*central-registry*)
 
+#+ccl (ql:quickload "cffi")
 (ql:quickload "demo-cgi")
 
 (defparameter *executable-pathname*  (merge-pathnames #P"demo.cgi" *load-pathname*))
